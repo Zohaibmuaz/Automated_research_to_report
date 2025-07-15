@@ -1,0 +1,12 @@
+langchain-openai
+langgraph
+crewai-tools
+python-dotenv
+requests
+beautifulsoup4
+lxml
+matplotlib
+seaborn
+langchain-community
+tavily-python
+pydantic
