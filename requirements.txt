@@ -1,4 +1,5 @@
 langchain-openai
+langchain_tavily
 langgraph
 crewai-tools
 python-dotenv
