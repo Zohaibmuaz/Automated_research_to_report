@@ -1,8 +1,6 @@
 import os
 import re
-import requests
 import json
-from bs4 import BeautifulSoup
 from typing import List, TypedDict, Optional
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
@@ -10,87 +8,119 @@ from langchain_openai import ChatOpenAI
 from langchain_tavily import TavilySearch
 from langgraph.graph import StateGraph, END
 
+# NEW: Import the Resend library
+import resend
+
 # --- SETUP ---
 load_dotenv()
 llm = ChatOpenAI(model="gpt-4o", temperature=0)
 try:
     search_tool = TavilySearch(max_results=5)
 except Exception as e:
-    print(f"Error initializing TavilySearchResults: {e}")
+    print(f"Error initializing TavilySearchResults: {e}. Ensure TAVILY_API_KEY is set.")
     exit()
 
 # --- PYDANTIC MODELS ---
 class AnalysisReport(BaseModel):
-    topic: str; overall_sentiment: str; key_findings: List[str]; potential_impact: str
+    topic: str
+    overall_sentiment: str
+    key_findings: List[str]
+    potential_impact: str
 
-# --- STATE DEFINITION ---
+# --- 1. DEFINE THE STATE ---
 class BIState(TypedDict):
     topic: str
     search_results: str
     analysis_report: Optional[AnalysisReport]
-    
-# --- AGENT NODES ---
+    final_report_markdown: Optional[str]
+
+# --- 2. DEFINE THE NODES (AGENTS) ---
+
 def news_researcher_node(state: BIState):
     print(f"\n--- AGENT: News Researcher (Topic: {state['topic']}) ---")
     search_results_str = search_tool.invoke(f"latest news and top stories about {state['topic']}")
-    print(f"  -> Research complete.")
+    print("  -> Research complete.")
     return {"search_results": search_results_str}
 
 def analyst_agent_node(state: BIState):
-    print(f"\n--- AGENT: Data Analyst ---")
+    print("\n--- AGENT: Data Analyst ---")
     context_str = state['search_results']
-    prompt = f"""You are a senior financial analyst. Analyze the following news content about '{state['topic']}' and generate a structured analysis report with sentiment, key findings, and potential impact.
-    Full Research Content: --- {context_str} ---"""
+    prompt = f"Analyze the following news content about '{state['topic']}' and generate a structured analysis report."
     structured_llm = llm.with_structured_output(AnalysisReport)
-    final_analysis = structured_llm.invoke(prompt)
+    final_analysis = structured_llm.invoke(prompt, {"input": context_str})
     final_analysis.topic = state['topic']
     return {"analysis_report": final_analysis}
 
-# We will combine the writer and notifier for this version
-def report_and_save_node(state: BIState):
-    print("\n--- AGENT: Report Writer & Notifier ---")
+def report_writer_node(state: BIState):
+    print("\n--- AGENT: Report Writer ---")
     report = state['analysis_report']
-    findings_str = "\n".join([f"- {finding}" for finding in report.key_findings])
     
-    report_text = f"""# Business Intelligence Report: {report.topic}
-## 1. Overall Sentiment Analysis
-**Overall Sentiment:** {report.overall_sentiment}
-## 2. Key Findings
-{findings_str}
-## 3. Potential Impact
-{report.potential_impact}
-"""
-    # Save the report to a file
-    from datetime import datetime
-    date_str = datetime.now().strftime("%Y-%m-%d")
-    safe_topic = re.sub(r'[\\/*?:"<>|]', "", report.topic).replace(" ", "_")
-    filename = f"report_{safe_topic}_{date_str}.md"
+    # Create an HTML formatted report for the email
+    findings_html = "".join([f"<li>{finding}</li>" for finding in report.key_findings])
     
-    with open(filename, "w", encoding="utf-8") as f:
-        f.write(report_text)
-    print(f"  -> Success! Report saved to {filename}")
-    return {} # End the graph
+    report_html = f"""
+    <h1>Business Intelligence Report: {report.topic}</h1>
+    <h2>Overall Sentiment Analysis</h2>
+    <p><b>Sentiment:</b> {report.overall_sentiment}</p>
+    <h2>Key Findings</h2>
+    <ul>{findings_html}</ul>
+    <h2>Potential Impact</h2>
+    <p>{report.potential_impact}</p>
+    """
+    return {"final_report_markdown": report_html}
 
-# --- GRAPH DEFINITION ---
+def email_notification_node(state: BIState):
+    print("\n--- AGENT: Email Notifier ---")
+    report_html = state['final_report_markdown']
+    topic = state['topic']
+    
+    # Get credentials from environment variables
+    resend_api_key = os.getenv("RESEND_API_KEY")
+    sender_email = os.getenv("EMAIL_SENDER_ADDRESS")
+    recipient_email = os.getenv("EMAIL_RECIPIENT_ADDRESS")
+    
+    if not all([resend_api_key, sender_email, recipient_email]):
+        print("  -> ERROR: Resend or email credentials not found in .env file. Skipping email.")
+        return {}
+
+    resend.api_key = resend_api_key
+    
+    params = {
+        "from": sender_email,
+        "to": recipient_email,
+        "subject": f"Daily AI BI Report: {topic}",
+        "html": report_html,
+    }
+
+    try:
+        # CORRECTED: Use resend.Emails.send (capital 'E')
+        email = resend.Emails.send(params)
+        print(f"  -> Successfully sent email report to {recipient_email}. Message ID: {email['id']}")
+    except Exception as e:
+        print(f"  -> FAILED to send email: {e}")
+        
+    return {}
+
+# --- 3. BUILD THE GRAPH ---
 workflow = StateGraph(BIState)
 workflow.add_node("researcher", news_researcher_node)
 workflow.add_node("analyst", analyst_agent_node)
-workflow.add_node("writer", report_and_save_node)
+workflow.add_node("writer", report_writer_node)
+workflow.add_node("notifier", email_notification_node)
 
 workflow.set_entry_point("researcher")
 workflow.add_edge("researcher", "analyst")
 workflow.add_edge("analyst", "writer")
-workflow.add_edge("writer", END)
+workflow.add_edge("writer", "notifier")
+workflow.add_edge("notifier", END)
 
 app = workflow.compile()
 
-# --- MAIN EXECUTION (NON-INTERACTIVE) ---
+# --- 4. MAIN EXECUTION (NON-INTERACTIVE) ---
 if __name__ == "__main__":
-    # This list defines the daily automated tasks.
-    # In a real system, this could come from a database or an API call.
     topics_to_research = [
         "NVIDIA stock performance",
-        "OpenAI's latest product releases",
+        "Latest advancements in autonomous driving",
         "Market trends in renewable energy"
     ]
     
@@ -102,8 +132,10 @@ if __name__ == "__main__":
         
         initial_input = {"topic": topic}
         
-        # Run the graph for the current topic
-        app.invoke(initial_input)
+        try:
+            app.invoke(initial_input)
+        except Exception as e:
+            print(f"  -> An error occurred during the workflow for topic '{topic}': {e}")
 
     print("\n=================================================")
     print("--- All BI Department tasks complete for today. ---")
