@@ -116,14 +116,23 @@ workflow.add_edge("notifier", END)
 
 app = workflow.compile()
 
-# --- 4. MAIN EXECUTION (NON-INTERACTIVE) ---
+# --- 4. MAIN EXECUTION (CONFIGURABLE & NON-INTERACTIVE) ---
 if __name__ == "__main__":
-    topics_to_research = [
-        "NVIDIA stock performance",
-        "Latest advancements in autonomous driving",
-        "Market trends in renewable energy"
-    ]
+    # Read the topics from an environment variable
+    topics_str = os.getenv("TOPICS_TO_RESEARCH")
     
+    if not topics_str:
+        # Provide a default list if the environment variable is not set
+        print("INFO: TOPICS_TO_RESEARCH environment variable not found. Using default topics.")
+        topics_to_research = [
+            "NVIDIA stock performance",
+            "Latest advancements in autonomous driving",
+            "Market trends in renewable energy"
+        ]
+    else:
+        # Split the comma-separated string into a list of topics
+        topics_to_research = [topic.strip() for topic in topics_str.split(',')]
+
     print("--- AUTONOMOUS BI DEPARTMENT: STARTING DAILY RUN ---")
     
     for topic in topics_to_research:
@@ -133,6 +142,7 @@ if __name__ == "__main__":
         initial_input = {"topic": topic}
         
         try:
+            # We invoke the graph and the final report will be sent by the notifier node
             app.invoke(initial_input)
         except Exception as e:
             print(f"  -> An error occurred during the workflow for topic '{topic}': {e}")
