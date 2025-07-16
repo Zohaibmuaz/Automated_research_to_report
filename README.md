@@ -44,3 +44,62 @@ This project utilizes a modern, production-grade AI stack:
 * **Data Validation:** Pydantic
 * **Containerization:** Docker
 * **Deployment (Scheduled Job):** Render / Cloud Services
+
+---
+
+## 🚀 Setup & Usage
+
+### 1. Clone the Repository
+
+```bash
+git clone [Your-GitHub-Repo-URL]
+cd [repository-folder]
+```
+
+## 2. Create and Configure the Environment
+
+Install the required libraries:
+
+```bash
+pip install -r requirements.txt
+```
+
+Create a `.env` file in the root directory and add your secret API keys:
+
+```env
+OPENAI_API_KEY="sk-..."
+TAVILY_API_KEY="tvly-..."
+# Optional: Notification service key
+RESEND_API_KEY="resend-..."
+```
+
+## 3. Run the System
+
+This script is designed to be non-interactive. It automatically processes the list of topics defined in the main block or in your `TOPICS_TO_RESEARCH` environment variable.
+
+```bash
+python your_script_name.py
+```
+
+The system will print its progress to the console and deliver the final reports to your configured notification channel.
+
+---
+
+## 🔮 Future Enhancements
+
+This project serves as a powerful foundation. Possible future improvements include:
+
+### Persistent Inter-run Memory
+Implement a persistent state (e.g., using SQLite checkpointer) so the agent can perform longitudinal, trend-based analysis by comparing today’s news to previous data.
+
+### Scalable Deployment
+Deploy the Docker container to a cloud provider like Render or AWS and configure it as a Cron Job to run automatically on a daily schedule.
+
+### Advanced Notification System
+Expand the Notifier agent to save reports to a cloud storage bucket (e.g., AWS S3) or a database, in addition to sending notifications via email, Slack, or Discord.
+
+---
+
+## 📄 License
+
+This project is licensed for educational and demonstration purposes. Please refer to the LICENSE file for more details.
